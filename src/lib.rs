@@ -1,55 +1,52 @@
-// Find all our documentation at https://docs.near.org
-use near_sdk::{log, near};
+use near_sdk::{log, near, AccountId, Promise, env, Gas, PromiseOrValue};
+use near_sdk::store::IterableMap;
+use near_sdk::json_types::{U128, U64};
 
-// Define the contract structure
+mod ext;
+use crate::ext::ft_contract;
+
 #[near(contract_state)]
 pub struct Contract {
-    greeting: String,
+    pub users_points: IterableMap<AccountId, U64>,
+    pub previous_caller: Option<AccountId>,
 }
 
-// Define the default, which automatically initializes the contract
 impl Default for Contract {
     fn default() -> Self {
-        Self {
-            greeting: "Hello".to_string(),
+        Self { 
+            users_points: IterableMap::new(b"u"),
+            previous_caller: None,
         }
     }
 }
 
-// Implement the contract structure
 #[near]
 impl Contract {
-    // Public method - returns the greeting saved, defaulting to DEFAULT_GREETING
-    pub fn get_greeting(&self) -> String {
-        self.greeting.clone()
+    // Add points based on how much usdc you have
+    pub fn add_points(&mut self) -> PromiseOrValue<String> {
+        self.previous_caller = Some(env::predecessor_account_id());
+        PromiseOrValue::Promise(ft_contract::ext("dai.fakes.testnet".parse().unwrap())
+            .with_static_gas(Gas::from_tgas(30))
+            .ft_balance_of(env::predecessor_account_id())
+            .then(Self::ext(env::current_account_id()).addPOINTScallback()))
     }
 
-    // Public method - accepts a greeting, such as "howdy", and records it
-    pub fn set_greeting(&mut self, greeting: String) {
-        log!("Saving greeting: {greeting}");
-        self.greeting = greeting;
-    }
-}
-
-/*
- * The rest of this file holds the inline tests for the code above
- * Learn more about Rust tests: https://doc.rust-lang.org/book/ch11-01-writing-tests.html
- */
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn get_default_greeting() {
-        let contract = Contract::default();
-        // this test did not call set_greeting so should return the default "Hello" greeting
-        assert_eq!(contract.get_greeting(), "Hello");
+    // This method removes points from the callers account
+    pub fn remove_points(&mut self, points_to_remove: U64, user: AccountId) {
+        let account_id = env::signer_account_id();
+        let points = self.users_points.get(&account_id);
+        let new_points = points.unwrap().0 - points_to_remove.0;
+        self.users_points.insert(account_id, U64(new_points));
     }
 
-    #[test]
-    fn set_then_get_greeting() {
-        let mut contract = Contract::default();
-        contract.set_greeting("howdy".to_string());
-        assert_eq!(contract.get_greeting(), "howdy");
+    // Lists the points for one user
+    pub fn get_all_points(&self) -> Vec<(&AccountId, &U64)> {
+        self.users_points.iter().collect()
+    }
+
+    // Call back for adding points
+    pub fn addPOINTScallback(&mut self, #[callback_unwrap] points: U64) -> String {
+        self.users_points.insert(self.previous_caller.as_ref().unwrap().clone(), points);
+        "helppppp meeeee".to_string()
     }
 }
